@@ -1,0 +1,173 @@
+---
+title: "PICARRO/GPS_merge"
+output: html_document
+---
+
+
+
+
+
+
+
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Merging of the PICARRO and GPS data 
+
+First thing to do is load the packages that are going to be needed in the code, 
+then set the program function 
+
+```{r }
+library(tidyverse)
+library(dplyr)
+library(sf)
+
+# program functions: 
+join_files = "sim"
+site_name = 'Auckland_city'
+
+```
+
+## First, import the data from both sources 
+
+The first is the picarro data, which is a if argument to join all of the files together.
+
+```{r}
+if(join_files == "sim"){
+  ### Join the files ####
+  setwd('/Users/harrison/Desktop/Auckland data/Raw data/DataLog_User_Sync/30/')
+  
+  
+  fileNames = list.files(path = '/Users/harrison/Desktop/Auckland data/Raw data/DataLog_User/', 
+                         pattern = "\\.dat$", recursive = TRUE, full.names = TRUE)
+  
+  dataP <- lapply(fileNames, function(x) {
+    read.table(file = x, header = T, stringsAsFactors = F, fill=TRUE)}) # this is reading in as a table
+  # Combine them
+  dataP <- do.call("rbind", lapply(dataP, as.data.frame))
+  
+  save.image(file = "//Users/harrison/Desktop/Auckland data/Raw data/Data_output/dataP.RData")
+  
+  saveRDS(dataP,'//Users/harrison/Desktop/Auckland data/Raw data/Data_output/Auckland_raw.rds')
+  
+} 
+
+# adjust the file paths when needed 
+
+# dataP <- readRDS("//Users/harrison/Desktop/Auckland data/Raw data/Data_output/Auckland_raw.rds")
+    # this is for reading it it when already saved
+
+```
+
+Then, import the GPX data, and merge all of the gpx data together 
+
+```{r}
+if(join_files == "sim"){
+  
+  setwd("~/Desktop/Auckland data/GPS data")
+  
+  fileNames = list.files(path = '/Users/harrison/Desktop/Auckland data/GPS data/',
+                         pattern = "\\.gpx", recursive = TRUE, full.names = TRUE)
+  
+  gps_all <- lapply(fileNames, function(x) {
+    read_sf(dsn = x, layer = "track_points")}) # this is picking the columns
+  # Combine them
+  gps_all <- do.call("rbind", lapply(gps_all, as.data.frame))
+  
+  save.image(file = "~/Desktop/Auckland data/GPS data.RData")
+  
+  saveRDS(gps_all,'~/Desktop/Auckland data/GPS data.rds')
+  
+} 
+
+# adjust the file paths when needed 
+#gps_all <- readRDS("~/Desktop/Auckland data/GPS data.rds")
+      # this is for reading it it when already saved 
+
+```
+
+## Next, account for the temporal difference between the two datasets
+
+This calculation will be used in the fractional hours, due to the numeric qualities, which are easier to work in.
+
+There is a 44 second difference between the PICARRO and GPS data:
+
+-- 21 delay seconds because of the tube to sensor delay
+-- 23 seconds for the PICARRO system being faster than the GPS system 
+
+The PICARRO data is brought forward as the GPS is considered the 'real' time 
+
+
+```{r}
+# 44 seconds in fractional hours = 0.0122 (44s x (1hr/3600))
+
+dataP$FRAC_HRS_SINCE_JAN1_GPS <- dataP$FRAC_HRS_SINCE_JAN1 - 0.0122
+# making the alteration of the time to the fractional hours 
+dataP$Fractional_hours <- format(dataP$FRAC_HRS_SINCE_JAN1_GPS, digits = 8)
+# getting the right number of digits, and creating a new column to merge the two dataframes together
+
+```
+
+
+# Make a Fractional_hours column on the gps data
+
+This will be used to get the data on one file. A function will be written to be used.
+
+
+
+```{r}
+
+Frac_hrs_since_jan01 <- function(x) {
+  for (i in 1:length(x)) {
+    seconds_to_jan01_2020 <- as.numeric(as.POSIXct("2020-01-01 00:00:00 UTC"))
+    seconds_to_data <- as.numeric(x) # this is the real GPS data 
+    hrs_since_jan01 <- (((seconds_to_data - seconds_to_jan01_2020)/60)/60)  
+    hrs_since_jan01 <- format(hrs_since_jan01, digits = 8)
+  }
+  return(hrs_since_jan01)
+}
+
+gps_all$Fractional_hours <- Frac_hrs_since_jan01(gps_all$time)
+
+
+```
+
+
+# Filter the PICARRO data 
+
+
+This is where it 
+
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
