@@ -1,16 +1,9 @@
 ---
 title: "PICARRO/GPS_merge"
+author: "Harrison O'Sullivan-Moffat"
+date: "13/04/2021"
 output: html_document
 ---
-
-
-
-
-
-
-
-
-
 
 
 ```{r setup, include=FALSE}
@@ -23,10 +16,14 @@ knitr::opts_chunk$set(echo = TRUE)
 First thing to do is load the packages that are going to be needed in the code, 
 then set the program function 
 
-```{r }
+```{r libraries, results='hide'}
 library(tidyverse)
 library(dplyr)
 library(sf)
+library(tmap)
+library(tmaptools)
+library(data.table)
+library(lubridate)
 
 # program functions: 
 join_files = "sim"
@@ -38,7 +35,7 @@ site_name = 'Auckland_city'
 
 The first is the picarro data, which is a if argument to join all of the files together.
 
-```{r}
+```{r import Picarro, results='hide'}
 if(join_files == "sim"){
   ### Join the files ####
   setwd('/Users/harrison/Desktop/Auckland data/Raw data/DataLog_User_Sync/30/')
@@ -67,7 +64,7 @@ if(join_files == "sim"){
 
 Then, import the GPX data, and merge all of the gpx data together 
 
-```{r}
+```{r import GPX}
 if(join_files == "sim"){
   
   setwd("~/Desktop/Auckland data/GPS data")
@@ -104,7 +101,7 @@ There is a 44 second difference between the PICARRO and GPS data:
 The PICARRO data is brought forward as the GPS is considered the 'real' time 
 
 
-```{r}
+```{r temporal time difference}
 # 44 seconds in fractional hours = 0.0122 (44s x (1hr/3600))
 
 dataP$FRAC_HRS_SINCE_JAN1_GPS <- dataP$FRAC_HRS_SINCE_JAN1 - 0.0122
@@ -115,13 +112,13 @@ dataP$Fractional_hours <- format(dataP$FRAC_HRS_SINCE_JAN1_GPS, digits = 8)
 ```
 
 
-# Make a Fractional_hours column on the gps data
+## Make a Fractional_hours column on the gps data
 
 This will be used to get the data on one file. A function will be written to be used.
 
 
 
-```{r}
+```{r adjusting the GPX timestamp}
 
 Frac_hrs_since_jan01 <- function(x) {
   for (i in 1:length(x)) {
@@ -139,35 +136,281 @@ gps_all$Fractional_hours <- Frac_hrs_since_jan01(gps_all$time)
 ```
 
 
-# Filter the PICARRO data 
+## Filter the PICARRO data 
 
 
-This is where it 
+This is where the potential changes of the Picarro number, the alarm status, and the cavity temperature limits
 
+```{r filter Picarro data}
+dataP3 <- dataP[dataP$species == 3,] # for the species of 3
+dataP3 <- dataP3[dataP3$ALARM_STATUS == 0,] # making sure there is no alarm 
+dataP3 <- dataP3[dataP3$CavityTemp >= 44.8 & dataP3$CavityTemp <= 55.1,]
+              # that the cavity temperature range is supplied by Lucas 
 
-
-
-
-
-
-
-
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+# there may be more parameters needed to be added 
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+## Merging both of the datasets 
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+This is merging the two datasets, this is not perfect with the 1:nrows() needing work
+
+
+The first step is to make the matrix into a list of matrices, and create an empty list 
+
+```{r lists}
+aaaaa = split(gps_all, gps_all$Fractional_hours)  
+# make the matrix into a list of matrices for the loop 
+
+a= list() ## set up an empty list for a to go into
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+This is the big for loop, which assigns all the Picarro points between the (adjusted) GPS data.
+
+This is the point were the relevant columns are selected, if more columns are needed, this is where it is changed 
+
+This in an intensive part of the code, the last 16 rows of data did not work, so this is why it is 1:number, rather than 1:nrows, this is important to keep in mind when looking at future datasets.
+
+```{r big FOR LOOP}
+for (i in 1:11415) {  
+  if (i < nrow(gps_all)) {df = subset(dataP3, dataP3$Fractional_hours >= format(as.numeric(aaaaa[[i]][,28]),digits = 8) & 
+                                        dataP3$Fractional_hours <= format(as.numeric(aaaaa[[i+1]][,28]),digits = 8))}
+  else{
+    if( i >= nrow(gps_all)){str<-paste('last row is row ',i,'',sep='')
+    print(str)}
+  }
+  
+  if(nrow(df) > 1){
+    dat = data.frame(df$DATE[1],df$TIME[1], mean(df$CH4_dry), mean(df$CO2_dry), mean(df$CO), 
+                     format(as.numeric(aaaaa[[i]][,28]),digits = 8), nrow(df))
+    colnames(dat) <- c("DATE","TIME","CH4_dry","CO2_dry","CO", "Fractional_hours", "N_points")
+    a[[i]]<-dat}
+  else{
+    if(nrow(df) == 0){str<-paste("no picarro data in row ", i,"", sep="")
+    print(str)}
+    else{
+      if(nrow(df) == 1){
+        dat = data.frame(df$DATE[1],df$TIME[1], df$CH4_dry[1], df$CO2_dry[1], df$CO[1],
+                         format(as.numeric(aaaaa[[i]][,28]),digits = 8), nrow(df))
+        colnames(dat) <- c("DATE","TIME","CH4_dry","CO2_dry","CO", "Fractional_hours","N_points")
+        a[[i]]<-dat}
+    }
+  }
+}
+
+```
+
+This loop fills the empty list ("a") that was created earlier, so merge this with the list that was created with the GPX data, then convert it to a 
+data.frame
+
+```{r list to data.frame}
+aa = do.call(rbind, a) 
+  # this is binding all of the "a"'s (list of data frames) together to make it 1 data.frame
+
+all_data <- inner_join(aa, gps_all, by = "Fractional_hours")
+  # this is the final kind of join 
+
+all_data2 <- as.data.frame(all_data[, c(1:7,10:12,34)])
+    # this is then the reduced data set that will be exported to a .csv file
+```
+
+Then, save it as a .csv file
+```{r save as .csv}
+write.csv(all_data2, "2020_AK_Car3.csv")
+  # this saves it in the current working directory
+```
+
+## How to re-import this data from a .csv file
+This is because the .csv format mucks with the geometry column (puts it over 2 columns), the steps are:
+
+1. Import the data 
+2. Rename the columns, note the geometry_X and geometry_Y
+3. Combine the two geometry columns in a new list 
+4. Then combine the geometry file with the existing file
+5. Remove the geometry_X and geometry_Y columns, then give the geometry column a name 
+
+```{r import the .csv}
+#all_data3 <- read.csv("/Users/harrison/Desktop/Auckland data/GPS Data/2020_AK_Car3.csv")
+
+# step 1 : rename columns 
+
+colnames(all_data3) <- c("DATE(P)","TIME(P)","CH4_dry","CO2_dry","CO","Fractional_hours", "N_points",
+                         "Track_seg_id_point", "ele","time(GPS)", "geometry_X","geometry_Y")
+
+# step 2 : combine geometry x & y in new data.frame
+
+geometry <- paste(as.character(all_data3[,11]), ",", as.character(all_data3[,12]))
+
+# step 3 : combine the two datasets to get the natural version of the geometry 
+
+all_data4 <- bind_cols(all_data3, geometry, by = NULL)
+
+# step 4 : remove the old columns, then rename the geometry column 
+
+all_data4 <- all_data4[-c(11,12)]
+names(all_data4)[11] <- "geometry"
+```
+
+
+# Calculating the Background 
+
+This is arguably the most important step, and it can change the results dramatically if the background is small or large.
+This code is not perfect, and as of 14/4/21 there is a problem with the background in the first running mean section.
+
+The first is to set the parameters, of what is going to be used in the for loop, as well as a empty list
+```{r background parameters}
+m.d.test <- all_data3
+
+dataset = m.d.test
+time = m.d.test$`time(GPS)`
+values = m.d.test$CH4_dry
+
+a = list()
+```
+
+Then, the big for loop. This is a "running mean", using the lubridate package. 
+1. Taking a period of time (which can be changed) before and after the data point. 
+2. Subsets all the values in the lowest 0.05 quartile of this time period. 
+3. Then, the mean of the values in this subset is what is used for the background 
+
+In this code, it is a 1/2 hour mean, which is set up near the beginning of the for loop
+
+```{r background for loop}
+for (i in 1:nrow(dataset)) {
+    t <- as.POSIXct(time[[i]], tz = "") # transforming the time data to work with lubridate
+    p <- minutes(30)  # setting the rolling mean time
+    if (as.POSIXct(t - p) >= as.POSIXct(time[[1]]) & 
+        as.POSIXct(t + p) <= as.POSIXct(time[[nrow(dataset)]])){ ## looking at if they have the full time window before and after
+      
+      df <-  dataset %>% filter(as.POSIXct(dataset$`time(GPS)`) >= as.POSIXct(t-p) & 
+                                  as.POSIXct(dataset$`time(GPS)`) <= as.POSIXct(t+p)) # subseting 
+      
+      q <- quantile(df$CH4_dry, 0.05) # the smallest 5% of the subset
+      s.df <- filter(df, df$CH4_dry < q) # get the smallest 5% in a subset
+      q <- mean(s.df$CH4_dry) # average the smallest 5% i.e the background 
+      v <- values[[i]] - q  # this is the enhancement 
+      
+      a[[i]] <- as.numeric(v)
+    }
+    
+    else  if (t-p < as.POSIXct(time[[1]])){ # this is if the window starts before the first window
+        
+        df <-  dataset %>% filter(as.POSIXct(dataset$`time(GPS)`) >= as.POSIXct(time[[1]]) & 
+                                    as.POSIXct(dataset$`time(GPS)`) <= as.POSIXct(t+p))
+        
+        q <- quantile(df$CH4_dry, 0.05) # the smallest 5% of the subset
+        df <- filter(df, df$CH4_dry < q) # get the smallest 5% in a subset
+        q <- mean(df$CH4_dry) # average the smallest 5% i.e the background 
+        v <- values[[i]] - q  # this is the enhancement 
+        a[[i]] <- as.numeric(v)}
+    
+        else if(t+p > as.POSIXct(time[[nrow(dataset)]])){ # this is if the end of the window is after the last row
+          
+          
+          df <-  dataset %>% filter(as.POSIXct(dataset$`time(GPS)`) >= as.POSIXct(t-p) &
+                                      as.POSIXct(dataset$`time(GPS)`) <= as.POSIXct(time[[nrow(dataset)]]))
+          
+          q <- quantile(df$CH4_dry, 0.05) # the smallest 5% of the subset
+          df <- filter(df, df$CH4_dry < q) # get the smallest 5% in a subset
+          q <- as.numeric(mean(df$CH4_dry)) # average the smallest 5% i.e the background 
+          v <- values[[i]] - q  # this is the enhancement 
+          a[[i]] <- as.numeric(v)}
+
+```
+
+Once again, this has filled up another empty list, so it has to be merged. Name the enhancement column, and add a column of what the background is. Then, save this as a .csv file so don't have to do this process again.
+
+```{r background merge}
+aa = do.call(rbind, a) 
+# this is binding all of the "a"'s (list of data frames) together to make it 1 data.frame
+aaa <- as.data.frame(aa)
+#convert to dataframe
+m.d.roll30 <- bind_cols(m.d.test, aaa)
+# bind them together
+colnames(m.d.roll30)[13] <- "CH4_enhancement"
+# name the enhancement column
+m.d.roll30 <- mutate(m.d.roll30, CH4_background = CH4_dry - CH4_enhancement)
+# create a new column of the background
+
+## save the half hour rolling mean 
+#write.csv(x=m.d.roll30, "Methane.bg.30minutes.csv")
+
+```
+
+## Mapping the Data
+Here is some code to get the data on a map
+
+This picks up from the importing a .csv file and getting the geometry merged and named (will go through it again)
+
+```{r mapping}
+#m.d.30 <- read.csv("/Users/harrison/Desktop/Auckland data/Mapping//csv files/Methane.bg.30minutes.csv")
+# read in the data
+
+geometry <- paste(as.character(m.d.30[,12]), ",", as.character(m.d.30[,13]))
+# combine the geometry because it is separated in a csv because it has a comma in it 
+
+
+m.d.301 <- bind_cols(m.d.30, geometry, by = NULL)
+# add this combination to the main dataset 
+
+
+m.d.301 <- m.d.301[-c(12,13)]
+# drop the original 2 geometry columns
+names(m.d.301)[14] <- "geometry"    
+# give the geometry a name 
+
+```
+
+Now, that this has been done, the geometry has to be assigned with some spatial value. 
+This next bit of code will do it and is __important__ and is changing the geometry to latitude/longitude column.
+The CRS (co-ordinate reference system) is 4326, which is the google earth system.
+
+```{r assigning spatial value}
+md.30_sf = m.d.301 %>%
+  mutate(geom = gsub(geometry,pattern="(\\))|(\\()|c",replacement = ""))%>%
+  tidyr::separate(geom,into=c("lat","lon"),sep=",")%>%
+  st_as_sf(.,coords=c("lat","lon"),crs=4326)
+
+```
+
+Then, a simple, interactive map on tmap
+The breaks are based on Ars et al. 2020 
+```{r tmap}
+tmap_mode("view")
+
+tm_shape(md.30_sf) +
+  tm_bubbles(col = "CH4_enhancement", scale = 0.08, style ="fixed", breaks = c(0, 0.04, 0.2, 1, 10000),
+             palette = "YlOrRd", shape = 19, border.lwd = 0, n = 5 )
+# this is still the ars et al., 2020 breaks 
+```
+
+## Will add in the code to show how to convert the points into a track
+
+This is not used at the moment, however, might be helpful in the speed and distance calculation. And may be helpful in the future.
+
+Jocelyn and Lucas like the points better 
+```{r track conversion}
+
+```
+
+# Next steps for data processes 
+
+There is another R script plotting the potential sources 
+
+Need to sort out the 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
