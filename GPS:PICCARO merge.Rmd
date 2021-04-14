@@ -231,7 +231,7 @@ This is because the .csv format mucks with the geometry column (puts it over 2 c
 5. Remove the geometry_X and geometry_Y columns, then give the geometry column a name 
 
 ```{r import the .csv}
-#all_data3 <- read.csv("/Users/harrison/Desktop/Auckland data/GPS Data/2020_AK_Car3.csv")
+all_data3 <- read.csv("/Users/harrison/Desktop/Auckland data/Mapping/csv files/2020_AK_Car3.csv")
 
 # step 1 : rename columns 
 
@@ -344,7 +344,7 @@ Here is some code to get the data on a map
 This picks up from the importing a .csv file and getting the geometry merged and named (will go through it again)
 
 ```{r mapping}
-#m.d.30 <- read.csv("/Users/harrison/Desktop/Auckland data/Mapping//csv files/Methane.bg.30minutes.csv")
+m.d.30 <- read.csv("/Users/harrison/Desktop/Auckland data/Mapping/csv files/Methane.bg.30minutes.csv")
 # read in the data
 
 geometry <- paste(as.character(m.d.30[,12]), ",", as.character(m.d.30[,13]))
